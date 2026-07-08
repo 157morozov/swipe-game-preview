@@ -1,0 +1,346 @@
+    <!doctype html>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+        <title>Swipe Tap Game</title>
+
+        <style>
+            * {
+                box-sizing: border-box;
+                -webkit-tap-highlight-color: transparent;
+            }
+
+            body {
+                margin: 0;
+                min-height: 100vh;
+                overflow: hidden;
+                font-family: Arial, sans-serif;
+                background: #ffffff;
+                color: #000000;
+                touch-action: none;
+                user-select: none;
+            }
+
+            .game {
+                width: 100vw;
+                height: 100vh;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                position: relative;
+            }
+
+            .score {
+                position: absolute;
+                top: 32px;
+                left: 0;
+                width: 100%;
+                text-align: center;
+                font-size: 28px;
+                font-weight: 700;
+            }
+
+            .circle {
+                width: min(64vw, 280px);
+                height: min(64vw, 280px);
+                border-radius: 50%;
+                background: #e5e5e5;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: background-color 0.08s ease, transform 0.08s ease;
+            }
+
+            .circle.success {
+                background: #76e38c;
+                transform: scale(1.04);
+            }
+
+            .circle.error {
+                background: #ff6b6b;
+                transform: scale(0.98);
+            }
+
+            .task {
+                font-size: 72px;
+                font-weight: 800;
+                line-height: 1;
+            }
+
+            .task.tap {
+                font-size: 52px;
+                letter-spacing: 2px;
+            }
+
+            .game-over {
+                position: fixed;
+                inset: 0;
+                display: none;
+                align-items: center;
+                justify-content: center;
+                flex-direction: column;
+                background: #ffffff;
+                z-index: 10;
+            }
+
+            .game-over.show {
+                display: flex;
+            }
+
+            .game-over-title {
+                font-size: 42px;
+                font-weight: 800;
+                margin-bottom: 12px;
+            }
+
+            .final-score {
+                font-size: 24px;
+                margin-bottom: 28px;
+            }
+
+            .restart {
+                border: none;
+                border-radius: 999px;
+                padding: 16px 32px;
+                font-size: 18px;
+                font-weight: 700;
+                color: #ffffff;
+                background: #000000;
+                cursor: pointer;
+            }
+
+            .hint {
+                position: absolute;
+                bottom: 28px;
+                left: 20px;
+                right: 20px;
+                text-align: center;
+                color: #777777;
+                font-size: 14px;
+            }
+        </style>
+    </head>
+
+    <body>
+        <main class="game" id="game">
+            <div class="score">
+                Score: <span id="score">0</span>
+            </div>
+
+            <div class="circle" id="circle">
+                <div class="task" id="task">↑</div>
+            </div>
+
+            <div class="hint">
+                Свайпни по стрелке или тапни, если видишь TAP
+            </div>
+        </main>
+
+        <section class="game-over" id="gameOver">
+            <div class="game-over-title">Game Over</div>
+            <div class="final-score">
+                Score: <span id="finalScore">0</span>
+            </div>
+            <button class="restart" id="restart">Рестарт</button>
+        </section>
+
+        <script>
+            const ACTIONS = [
+                {
+                    type: 'swipe',
+                    direction: 'up',
+                    label: '↑',
+                },
+                {
+                    type: 'swipe',
+                    direction: 'down',
+                    label: '↓',
+                },
+                {
+                    type: 'swipe',
+                    direction: 'left',
+                    label: '←',
+                },
+                {
+                    type: 'swipe',
+                    direction: 'right',
+                    label: '→',
+                },
+                {
+                    type: 'tap',
+                    direction: 'tap',
+                    label: 'TAP',
+                },
+            ];
+
+            const ROUND_TIME = 1000;
+            const SWIPE_MIN_DISTANCE = 45;
+
+            const game = document.getElementById('game');
+            const circle = document.getElementById('circle');
+            const task = document.getElementById('task');
+            const scoreElement = document.getElementById('score');
+            const finalScoreElement = document.getElementById('finalScore');
+            const gameOver = document.getElementById('gameOver');
+            const restart = document.getElementById('restart');
+
+            let score = 0;
+            let currentAction = null;
+            let timerId = null;
+            let isGameActive = true;
+
+            let startX = 0;
+            let startY = 0;
+            let startTime = 0;
+
+            function hapticSuccess() {
+                if (window.Telegram?.WebApp?.HapticFeedback) {
+                    window.Telegram.WebApp.HapticFeedback.impactOccurred('light');
+                    return;
+                }
+
+                if (navigator.vibrate) {
+                    navigator.vibrate(20);
+                }
+            }
+
+            function hapticError() {
+                if (window.Telegram?.WebApp?.HapticFeedback) {
+                    window.Telegram.WebApp.HapticFeedback.notificationOccurred('error');
+                    return;
+                }
+
+                if (navigator.vibrate) {
+                    navigator.vibrate(220);
+                }
+            }
+
+            function getRandomAction() {
+                const index = Math.floor(Math.random() * ACTIONS.length);
+                return ACTIONS[index];
+            }
+
+            function renderAction() {
+                currentAction = getRandomAction();
+
+                task.textContent = currentAction.label;
+                task.classList.toggle('tap', currentAction.type === 'tap');
+
+                clearTimeout(timerId);
+                timerId = setTimeout(() => {
+                    lose();
+                }, ROUND_TIME);
+            }
+
+            function flashCircle(className) {
+                circle.classList.add(className);
+
+                setTimeout(() => {
+                    circle.classList.remove(className);
+                }, 90);
+            }
+
+            function nextRound() {
+                score += 1;
+                scoreElement.textContent = score;
+
+                hapticSuccess();
+                flashCircle('success');
+                renderAction();
+            }
+
+            function lose() {
+                if (!isGameActive) {
+                    return;
+                }
+
+                isGameActive = false;
+                clearTimeout(timerId);
+
+                hapticError();
+                flashCircle('error');
+
+                finalScoreElement.textContent = score;
+
+                setTimeout(() => {
+                    gameOver.classList.add('show');
+                }, 120);
+            }
+
+            function restartGame() {
+                score = 0;
+                isGameActive = true;
+                scoreElement.textContent = score;
+                gameOver.classList.remove('show');
+                renderAction();
+            }
+
+            function getSwipeDirection(deltaX, deltaY) {
+                const absX = Math.abs(deltaX);
+                const absY = Math.abs(deltaY);
+
+                if (absX < SWIPE_MIN_DISTANCE && absY < SWIPE_MIN_DISTANCE) {
+                    return 'tap';
+                }
+
+                if (absX > absY) {
+                    return deltaX > 0 ? 'right' : 'left';
+                }
+
+                return deltaY > 0 ? 'down' : 'up';
+            }
+
+            function handleAction(playerDirection) {
+                if (!isGameActive || !currentAction) {
+                    return;
+                }
+
+                if (playerDirection === currentAction.direction) {
+                    nextRound();
+                    return;
+                }
+
+                lose();
+            }
+
+            game.addEventListener('pointerdown', (event) => {
+                if (!isGameActive) {
+                    return;
+                }
+
+                startX = event.clientX;
+                startY = event.clientY;
+                startTime = Date.now();
+            });
+
+            game.addEventListener('pointerup', (event) => {
+                if (!isGameActive) {
+                    return;
+                }
+
+                const deltaX = event.clientX - startX;
+                const deltaY = event.clientY - startY;
+                const duration = Date.now() - startTime;
+
+                const direction = getSwipeDirection(deltaX, deltaY);
+
+                if (direction === 'tap' && duration > 350) {
+                    lose();
+                    return;
+                }
+
+                handleAction(direction);
+            });
+
+            restart.addEventListener('click', restartGame);
+
+            document.addEventListener('contextmenu', (event) => {
+                event.preventDefault();
+            });
+
+            renderAction();
+        </script>
+    </body>
+    </html>
